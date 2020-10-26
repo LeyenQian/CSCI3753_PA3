@@ -16,6 +16,7 @@
 
 #define TASK_FREE   0x0
 #define TASK_BUSY   0x1
+#define TASK_DONE   0x2
 
 #define MUTEX_OPR(LOCK, OPR)    pthread_mutex_lock(LOCK);\
                                 OPR\
@@ -84,7 +85,5 @@ void *requester_thread(void *);
 void *resolver_thread(void *);
 int parse_arguments(P_PROC_MNGR, int, const char **);
 void init_thread_pool(P_PROC_MNGR);
-void init_requesters(P_PROC_MNGR);
-void init_resolvers(P_PROC_MNGR);
 
 #endif

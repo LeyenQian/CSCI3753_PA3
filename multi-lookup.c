@@ -16,8 +16,6 @@ int main(int argc, const char **argv)
     
     init_thread_pool(p_proc_mngr);
 
-    printf("%d, %d\n", p_proc_mngr->requester_pool.active_count, p_proc_mngr->resolver_pool.active_count);
-
     free(p_proc_mngr);
     return EXIT_SUCCESS;
 }
@@ -51,38 +49,35 @@ int parse_arguments(P_PROC_MNGR p_proc_mngr, int argc, const char **argv)
 
 void init_thread_pool(P_PROC_MNGR p_proc_mngr)
 {
-    // initial resolver & requester thread pool
-    init_resolvers(p_proc_mngr);
-    init_requesters(p_proc_mngr);
+    // initial task list
+    pthread_mutex_init(&p_proc_mngr->task_list.mutex, NULL);
+    pthread_cond_init(&p_proc_mngr->task_list.ready, NULL);
+    pthread_cond_init(&p_proc_mngr->task_list.empty, NULL);
 
-    // join threads
+    // initial resolver & requester threads pool
+    pthread_mutex_init(&p_proc_mngr->resolver_pool.mutex, NULL);
+    for(int idx = 0; idx < p_proc_mngr->resolver_threads_count; idx ++)
+        pthread_create(&p_proc_mngr->resolver_pool.resolver_ids[idx], NULL, resolver_thread, p_proc_mngr);
+
+    pthread_mutex_init(&p_proc_mngr->requester_pool.mutex, NULL);
+    for(int idx = 0; idx < p_proc_mngr->requester_threads_count; idx ++)
+        pthread_create(&p_proc_mngr->requester_pool.requester_ids[idx], NULL, requester_thread, p_proc_mngr);
+
+    // join threads pool
     for(int idx = 0; idx < p_proc_mngr->requester_threads_count; idx ++)
         pthread_join(p_proc_mngr->requester_pool.requester_ids[idx], NULL);
 
     for(int idx = 0; idx < p_proc_mngr->resolver_threads_count; idx ++)
         pthread_join(p_proc_mngr->resolver_pool.resolver_ids[idx], NULL);
 
-    // clean up
+    // clean up task list
+    pthread_mutex_destroy(&p_proc_mngr->task_list.mutex);
+    pthread_cond_destroy(&p_proc_mngr->task_list.ready);
+    pthread_cond_destroy(&p_proc_mngr->task_list.empty);
+
+    // clean up threads pool
     pthread_mutex_destroy(&p_proc_mngr->requester_pool.mutex);
     pthread_mutex_destroy(&p_proc_mngr->resolver_pool.mutex);
-}
-
-
-void init_requesters(P_PROC_MNGR p_proc_mngr)
-{
-    pthread_mutex_init(&p_proc_mngr->requester_pool.mutex, NULL);
-
-    for(int idx = 0; idx < p_proc_mngr->requester_threads_count; idx ++)
-        pthread_create(&p_proc_mngr->requester_pool.requester_ids[idx], NULL, requester_thread, p_proc_mngr);
-}
-
-
-void init_resolvers(P_PROC_MNGR p_proc_mngr)
-{
-    pthread_mutex_init(&p_proc_mngr->resolver_pool.mutex, NULL);
-
-    for(int idx = 0; idx < p_proc_mngr->resolver_threads_count; idx ++)
-        pthread_create(&p_proc_mngr->resolver_pool.resolver_ids[idx], NULL, resolver_thread, p_proc_mngr);
 }
 
 
@@ -105,7 +100,42 @@ void *resolver_thread(void *argv)
     P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)argv;
     MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count++;);
 
+    for(P_TASK p_task = NULL;;p_task = NULL)
+    {
+        // check termination condition [without lock]
+        if(p_proc_mngr->requester_pool.active_count <= 0 &&
+           p_proc_mngr->task_list.active_count <= 0) break;
 
+        // try to get a task [with lock]
+        //      succeed --> mark the flag as TASK_BUSY
+        //      failed  --> terminate thread, if active count of requesters <= 0
+        //      failed  --> notify requester, if active count of requesters > 0
+        MUTEX_OPR(&p_proc_mngr->task_list.mutex, 
+            for(int i = 0; i < ARRAY_SIZE; i ++)
+            {
+                if(p_proc_mngr->task_list.tasks[i].flag == TASK_FREE)
+                {
+                    p_task = &p_proc_mngr->task_list.tasks[i];
+                    p_task->flag = TASK_BUSY; break;
+                }
+            }
+        );
+
+        if(p_task == NULL)
+        {
+            if(p_proc_mngr->requester_pool.active_count <= 0) break;
+            pthread_cond_signal(&p_proc_mngr->task_list.empty); continue;
+        }
+
+        // solve the task [without lock]
+        //      write result to <results.txt> [with lock]
+        //      mark the flag as TASK_DONE
+        dnslookup(p_task->domain, p_task->address, MAX_IP_LENGTH);
+        // write
+        p_task->flag = TASK_DONE;
+    }
+
+    printf("end\n");
     // decrease active count
     MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count--;);
     return NULL;
