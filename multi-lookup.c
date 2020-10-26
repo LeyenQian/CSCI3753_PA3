@@ -16,9 +16,12 @@ int main(int argc, const char **argv)
     
     init_thread_pool(p_proc_mngr);
 
+    printf("%d, %d\n", p_proc_mngr->requester_pool.active_count, p_proc_mngr->resolver_pool.active_count);
+
     free(p_proc_mngr);
     return EXIT_SUCCESS;
 }
+
 
 int parse_arguments(P_PROC_MNGR p_proc_mngr, int argc, const char **argv)
 {
@@ -45,12 +48,11 @@ int parse_arguments(P_PROC_MNGR p_proc_mngr, int argc, const char **argv)
             OP_FAILURE : OP_SUCCESS;
 }
 
+
 void init_thread_pool(P_PROC_MNGR p_proc_mngr)
 {
-    // initial resolver thread pool
+    // initial resolver & requester thread pool
     init_resolvers(p_proc_mngr);
-
-    // initial requester thread pool
     init_requesters(p_proc_mngr);
 
     // join threads
@@ -65,6 +67,7 @@ void init_thread_pool(P_PROC_MNGR p_proc_mngr)
     pthread_mutex_destroy(&p_proc_mngr->resolver_pool.mutex);
 }
 
+
 void init_requesters(P_PROC_MNGR p_proc_mngr)
 {
     pthread_mutex_init(&p_proc_mngr->requester_pool.mutex, NULL);
@@ -72,6 +75,7 @@ void init_requesters(P_PROC_MNGR p_proc_mngr)
     for(int idx = 0; idx < p_proc_mngr->requester_threads_count; idx ++)
         pthread_create(&p_proc_mngr->requester_pool.requester_ids[idx], NULL, requester_thread, p_proc_mngr);
 }
+
 
 void init_resolvers(P_PROC_MNGR p_proc_mngr)
 {
@@ -81,14 +85,28 @@ void init_resolvers(P_PROC_MNGR p_proc_mngr)
         pthread_create(&p_proc_mngr->resolver_pool.resolver_ids[idx], NULL, resolver_thread, p_proc_mngr);
 }
 
+
 void *requester_thread(void *argv)
 {
-    printf("Requester: %lx\n", pthread_self());
+    // increase active count
+    P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)argv;
+    MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count++;);
+
+
+    // decrease active count
+    MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count--;);
     return NULL;
 }
 
+
 void *resolver_thread(void *argv)
 {
-    printf("Resolver: %lx\n", pthread_self());
+    // increase active count
+    P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)argv;
+    MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count++;);
+
+
+    // decrease active count
+    MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count--;);
     return NULL;
 }
