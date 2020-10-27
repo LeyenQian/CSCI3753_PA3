@@ -14,8 +14,11 @@ int main(int argc, const char **argv)
         return EXIT_FAILURE;
     }
     
+    init_memory_pool(p_proc_mngr);
     init_thread_pool(p_proc_mngr);
 
+    free_thread_pool(p_proc_mngr);
+    free_memory_pool(p_proc_mngr);
     free(p_proc_mngr);
     return EXIT_SUCCESS;
 }
@@ -51,7 +54,6 @@ void init_thread_pool(P_PROC_MNGR p_proc_mngr)
 {
     // initial task list
     pthread_mutex_init(&p_proc_mngr->task_list.mutex, NULL);
-    pthread_cond_init(&p_proc_mngr->task_list.ready, NULL);
     pthread_cond_init(&p_proc_mngr->task_list.empty, NULL);
 
     // initial resolver & requester threads pool
@@ -69,15 +71,121 @@ void init_thread_pool(P_PROC_MNGR p_proc_mngr)
 
     for(int idx = 0; idx < p_proc_mngr->resolver_threads_count; idx ++)
         pthread_join(p_proc_mngr->resolver_pool.resolver_ids[idx], NULL);
+}
 
+
+void free_thread_pool(P_PROC_MNGR p_proc_mngr)
+{
     // clean up task list
     pthread_mutex_destroy(&p_proc_mngr->task_list.mutex);
-    pthread_cond_destroy(&p_proc_mngr->task_list.ready);
     pthread_cond_destroy(&p_proc_mngr->task_list.empty);
 
     // clean up threads pool
     pthread_mutex_destroy(&p_proc_mngr->requester_pool.mutex);
     pthread_mutex_destroy(&p_proc_mngr->resolver_pool.mutex);
+}
+
+
+void init_memory_pool(P_PROC_MNGR p_proc_mngr)
+{
+    P_MEMORY_POOL p_memory_pool = &p_proc_mngr->memory_pool;
+
+    for(int i = 0; i < MEMORY_POOL_SIZE; i ++)
+    {
+        P_NODE p_node = (P_NODE)malloc(sizeof(NODE));
+        put_node(p_memory_pool, p_node, NODE_FREE);
+    }
+}
+
+
+void free_memory_pool(P_PROC_MNGR p_proc_mngr)
+{
+    P_MEMORY_POOL p_memory_pool = &p_proc_mngr->memory_pool;
+
+    for(P_NODE p_node = get_node(p_memory_pool, NODE_FREE_NO_MALLOC); p_node != NULL; p_node = get_node(p_memory_pool, NODE_FREE))
+        if(p_node != NULL) free(p_node);
+
+    for(P_NODE p_node = get_node(p_memory_pool, NODE_USED); p_node != NULL; p_node = get_node(p_memory_pool, NODE_USED))
+        if(p_node != NULL) free(p_node);
+}
+
+
+P_NODE get_node(P_MEMORY_POOL p_memory_pool, int flag)
+{
+    P_NODE p_node = NULL;
+
+    if(flag == NODE_FREE || flag == NODE_FREE_NO_MALLOC)
+    {
+        p_node = p_memory_pool->free;
+        if(p_node == NULL && flag == NODE_FREE) return (P_NODE)malloc(sizeof(NODE));
+        else return NULL;
+        p_memory_pool->free = p_node->next;
+    }
+    else
+    {
+        p_node = p_memory_pool->used;
+        if(p_node == NULL) return NULL;
+        p_memory_pool->used = p_node->next;
+    }
+
+    return p_node;
+}
+
+
+void put_node(P_MEMORY_POOL p_memory_pool, P_NODE p_node, int flag)
+{
+    p_node->next = NULL;
+
+    if(flag == NODE_FREE)
+    {
+        if(p_memory_pool->free == NULL)
+        {
+            p_memory_pool->free = p_node;
+        }
+        else
+        {
+            p_node->next = p_memory_pool->free;
+            p_memory_pool->free = p_node;
+        }
+    }
+    else
+    {
+        if(p_memory_pool->used == NULL)
+        {
+            p_memory_pool->used = p_node;
+        }
+        else
+        {
+            p_node->next = p_memory_pool->used;
+            p_memory_pool->used = p_node;
+        }
+    }
+}
+
+
+int fill_tasks(char* path, P_PROC_MNGR p_proc_mngr)
+{
+    FILE *fp = NULL;
+
+    // try
+    fp = fopen(path, "r");
+    if(fp == NULL) return OP_FAILURE;
+
+    // fill task list first
+    // put rest into queue
+    while(!feof(fp))
+    {
+
+    }
+
+    fclose(fp);
+    return OP_SUCCESS;
+}
+
+
+void save_log(char* path, char* content)
+{
+
 }
 
 
@@ -87,6 +195,21 @@ void *requester_thread(void *argv)
     P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)argv;
     MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count++;);
 
+    // try to get a input file path [with lock]
+    //      succeed --> fill task list, boardcast resolvers
+    //      failed  --> continue the loop, if input file path is incorrect
+    //      failed  --> terminate thread,  if hostname_paths_count <= 1
+    MUTEX_OPR(&p_proc_mngr->task_list.mutex, 
+        for(;;)
+        {
+            pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
+            printf("%lx  --->  receive empty signal\n",pthread_self());
+
+            if(p_proc_mngr->hostname_paths_count <= 1) break;
+            if(fill_tasks(p_proc_mngr->hostname_paths[p_proc_mngr->hostname_paths_count - 1], p_proc_mngr) == OP_FAILURE) continue;
+            p_proc_mngr->hostname_paths_count --;
+        }
+    );
 
     // decrease active count
     MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count--;);
@@ -96,7 +219,7 @@ void *requester_thread(void *argv)
 
 void *resolver_thread(void *argv)
 {
-    // increase active count
+    // increase pool active count
     P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)argv;
     MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count++;);
 
@@ -115,6 +238,7 @@ void *resolver_thread(void *argv)
             {
                 if(p_proc_mngr->task_list.tasks[i].flag == TASK_FREE)
                 {
+                    p_proc_mngr->task_list.active_count --;
                     p_task = &p_proc_mngr->task_list.tasks[i];
                     p_task->flag = TASK_BUSY; break;
                 }
@@ -131,12 +255,11 @@ void *resolver_thread(void *argv)
         //      write result to <results.txt> [with lock]
         //      mark the flag as TASK_DONE
         dnslookup(p_task->domain, p_task->address, MAX_IP_LENGTH);
-        // write
+        printf("%lx  --->  %s: %s\n",pthread_self(), p_task->domain, p_task->address);
         p_task->flag = TASK_DONE;
     }
 
-    printf("end\n");
-    // decrease active count
+    // decrease pool active count
     MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count--;);
     return NULL;
 }
