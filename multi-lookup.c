@@ -102,7 +102,7 @@ void free_memory_pool(P_PROC_MNGR p_proc_mngr)
 {
     P_MEMORY_POOL p_memory_pool = &p_proc_mngr->memory_pool;
 
-    for(P_NODE p_node = get_node(p_memory_pool, NODE_FREE_NO_MALLOC); p_node != NULL; p_node = get_node(p_memory_pool, NODE_FREE))
+    for(P_NODE p_node = get_node(p_memory_pool, NODE_FREE_NO_MALLOC); p_node != NULL; p_node = get_node(p_memory_pool, NODE_FREE_NO_MALLOC))
         if(p_node != NULL) free(p_node);
 
     for(P_NODE p_node = get_node(p_memory_pool, NODE_USED); p_node != NULL; p_node = get_node(p_memory_pool, NODE_USED))
@@ -118,7 +118,7 @@ P_NODE get_node(P_MEMORY_POOL p_memory_pool, int flag)
     {
         p_node = p_memory_pool->free;
         if(p_node == NULL && flag == NODE_FREE) return (P_NODE)malloc(sizeof(NODE));
-        else return NULL;
+        if(p_node == NULL && flag == NODE_FREE_NO_MALLOC) return NULL;
         p_memory_pool->free = p_node->next;
     }
     else
@@ -144,8 +144,9 @@ void put_node(P_MEMORY_POOL p_memory_pool, P_NODE p_node, int flag)
         }
         else
         {
-            p_node->next = p_memory_pool->free;
-            p_memory_pool->free = p_node;
+            P_NODE p_curr_node = p_memory_pool->free;
+            while(p_curr_node->next != NULL) p_curr_node = p_curr_node->next;
+            p_curr_node->next = p_node;
         }
     }
     else
@@ -156,8 +157,9 @@ void put_node(P_MEMORY_POOL p_memory_pool, P_NODE p_node, int flag)
         }
         else
         {
-            p_node->next = p_memory_pool->used;
-            p_memory_pool->used = p_node;
+            P_NODE p_curr_node = p_memory_pool->used;
+            while(p_curr_node->next != NULL) p_curr_node = p_curr_node->next;
+            p_curr_node->next = p_node;
         }
     }
 }
@@ -170,7 +172,7 @@ void fill_tasks_helper(P_PROC_MNGR p_proc_mngr)
         P_NODE p_node = NULL;
         if(p_proc_mngr->task_list.tasks[i].flag != TASK_DONE) continue;
 
-        get_node(&p_proc_mngr->memory_pool, NODE_USED);
+        p_node = get_node(&p_proc_mngr->memory_pool, NODE_USED);
         if(p_node == NULL) break;
 
         strcpy(p_proc_mngr->task_list.tasks[i].domain, p_node->domain);
@@ -185,7 +187,7 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr)
     // move content from queue to task list
     //      read file, queue is empty
     //      read queue, queue is not empty
-    if(p_proc_mngr->memory_pool.free != NULL)
+    if(p_proc_mngr->memory_pool.used != NULL)
     {
         fill_tasks_helper(p_proc_mngr);
     }
@@ -193,6 +195,7 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr)
     {
         FILE *fp = NULL;
         char* path = p_proc_mngr->hostname_paths[--p_proc_mngr->hostname_paths_count];
+        printf("%s\n", path);
 
         fp = fopen(path, "r");
         if(fp == NULL) return OP_FAILURE;
@@ -200,8 +203,12 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr)
         while(!feof(fp))
         {
             P_NODE p_node = get_node(&p_proc_mngr->memory_pool, NODE_FREE);
+            
             fgets(p_node->domain, MAX_NAME_LENGTH, fp);
-            put_node(&p_proc_mngr->memory_pool, p_node, NODE_USED);
+            p_node->domain[strlen(p_node->domain) - 1] = '\0';
+            
+            if(strlen(p_node->domain) == 0) put_node(&p_proc_mngr->memory_pool, p_node, NODE_FREE);
+            else put_node(&p_proc_mngr->memory_pool, p_node, NODE_USED);
         }
 
         fclose(fp);
@@ -228,16 +235,16 @@ void *requester_thread(void *argv)
     //      succeed --> fill task list
     //      failed  --> continue the loop, if input file path is incorrect
     //      failed  --> terminate thread,  if hostname_paths_count <= 1
-    pthread_mutex_lock(&p_proc_mngr->task_list.mutex);
-    for(;;)
-    {
-        pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
-        printf("%lx  --->  receive empty signal\n",pthread_self());
+    MUTEX_OPR(&p_proc_mngr->task_list.mutex, 
+        for(;;)
+        {
+            pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
+            printf("%lx  --->  receive empty signal\n",pthread_self());
 
-        if(p_proc_mngr->hostname_paths_count < 1) break;
-        if(fill_tasks(p_proc_mngr) == OP_FAILURE) continue;
-    }
-    pthread_mutex_unlock(&p_proc_mngr->task_list.mutex);
+            if(p_proc_mngr->hostname_paths_count < 1 && p_proc_mngr->memory_pool.used == NULL) break;
+            if(fill_tasks(p_proc_mngr) == OP_FAILURE) continue;
+        }
+    );
 
     // decrease active count
     MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count--;);

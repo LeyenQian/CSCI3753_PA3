@@ -104,6 +104,7 @@ void *requester_thread(void *);
 void *resolver_thread(void *);
 
 int parse_arguments(P_PROC_MNGR, int, const char **);
+void fill_tasks_helper(P_PROC_MNGR);
 int fill_tasks(P_PROC_MNGR);
 void save_log(char*, char*);
 
