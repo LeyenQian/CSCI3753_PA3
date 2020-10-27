@@ -15,9 +15,9 @@
 #define OP_SUCCESS  0
 #define OP_FAILURE  -1
 
-#define TASK_FREE   0x0
+#define TASK_FREE   0x2
 #define TASK_BUSY   0x1
-#define TASK_DONE   0x2
+#define TASK_DONE   0x0
 
 #define NODE_FREE           0x0
 #define NODE_USED           0x1
@@ -104,7 +104,7 @@ void *requester_thread(void *);
 void *resolver_thread(void *);
 
 int parse_arguments(P_PROC_MNGR, int, const char **);
-int fill_tasks(char*, P_PROC_MNGR);
+int fill_tasks(P_PROC_MNGR);
 void save_log(char*, char*);
 
 void init_thread_pool(P_PROC_MNGR);

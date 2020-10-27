@@ -57,13 +57,13 @@ void init_thread_pool(P_PROC_MNGR p_proc_mngr)
     pthread_cond_init(&p_proc_mngr->task_list.empty, NULL);
 
     // initial resolver & requester threads pool
-    pthread_mutex_init(&p_proc_mngr->resolver_pool.mutex, NULL);
-    for(int idx = 0; idx < p_proc_mngr->resolver_threads_count; idx ++)
-        pthread_create(&p_proc_mngr->resolver_pool.resolver_ids[idx], NULL, resolver_thread, p_proc_mngr);
-
     pthread_mutex_init(&p_proc_mngr->requester_pool.mutex, NULL);
     for(int idx = 0; idx < p_proc_mngr->requester_threads_count; idx ++)
         pthread_create(&p_proc_mngr->requester_pool.requester_ids[idx], NULL, requester_thread, p_proc_mngr);
+
+    pthread_mutex_init(&p_proc_mngr->resolver_pool.mutex, NULL);
+    for(int idx = 0; idx < p_proc_mngr->resolver_threads_count; idx ++)
+        pthread_create(&p_proc_mngr->resolver_pool.resolver_ids[idx], NULL, resolver_thread, p_proc_mngr);
 
     // join threads pool
     for(int idx = 0; idx < p_proc_mngr->requester_threads_count; idx ++)
@@ -163,22 +163,51 @@ void put_node(P_MEMORY_POOL p_memory_pool, P_NODE p_node, int flag)
 }
 
 
-int fill_tasks(char* path, P_PROC_MNGR p_proc_mngr)
+void fill_tasks_helper(P_PROC_MNGR p_proc_mngr)
 {
-    FILE *fp = NULL;
-
-    // try
-    fp = fopen(path, "r");
-    if(fp == NULL) return OP_FAILURE;
-
-    // fill task list first
-    // put rest into queue
-    while(!feof(fp))
+    for(int i = 0; i < ARRAY_SIZE; i ++)
     {
+        P_NODE p_node = NULL;
+        if(p_proc_mngr->task_list.tasks[i].flag != TASK_DONE) continue;
 
+        get_node(&p_proc_mngr->memory_pool, NODE_USED);
+        if(p_node == NULL) break;
+
+        strcpy(p_proc_mngr->task_list.tasks[i].domain, p_node->domain);
+        p_proc_mngr->task_list.tasks[i].flag = TASK_FREE;
+        put_node(&p_proc_mngr->memory_pool, p_node, NODE_FREE);
     }
+}
 
-    fclose(fp);
+
+int fill_tasks(P_PROC_MNGR p_proc_mngr)
+{
+    // move content from queue to task list
+    //      read file, queue is empty
+    //      read queue, queue is not empty
+    if(p_proc_mngr->memory_pool.free != NULL)
+    {
+        fill_tasks_helper(p_proc_mngr);
+    }
+    else
+    {
+        FILE *fp = NULL;
+        char* path = p_proc_mngr->hostname_paths[--p_proc_mngr->hostname_paths_count];
+
+        fp = fopen(path, "r");
+        if(fp == NULL) return OP_FAILURE;
+
+        while(!feof(fp))
+        {
+            P_NODE p_node = get_node(&p_proc_mngr->memory_pool, NODE_FREE);
+            fgets(p_node->domain, MAX_NAME_LENGTH, fp);
+            put_node(&p_proc_mngr->memory_pool, p_node, NODE_USED);
+        }
+
+        fclose(fp);
+        fill_tasks_helper(p_proc_mngr);
+    }
+    
     return OP_SUCCESS;
 }
 
@@ -196,20 +225,19 @@ void *requester_thread(void *argv)
     MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count++;);
 
     // try to get a input file path [with lock]
-    //      succeed --> fill task list, boardcast resolvers
+    //      succeed --> fill task list
     //      failed  --> continue the loop, if input file path is incorrect
     //      failed  --> terminate thread,  if hostname_paths_count <= 1
-    MUTEX_OPR(&p_proc_mngr->task_list.mutex, 
-        for(;;)
-        {
-            pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
-            printf("%lx  --->  receive empty signal\n",pthread_self());
+    pthread_mutex_lock(&p_proc_mngr->task_list.mutex);
+    for(;;)
+    {
+        pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
+        printf("%lx  --->  receive empty signal\n",pthread_self());
 
-            if(p_proc_mngr->hostname_paths_count <= 1) break;
-            if(fill_tasks(p_proc_mngr->hostname_paths[p_proc_mngr->hostname_paths_count - 1], p_proc_mngr) == OP_FAILURE) continue;
-            p_proc_mngr->hostname_paths_count --;
-        }
-    );
+        if(p_proc_mngr->hostname_paths_count < 1) break;
+        if(fill_tasks(p_proc_mngr) == OP_FAILURE) continue;
+    }
+    pthread_mutex_unlock(&p_proc_mngr->task_list.mutex);
 
     // decrease active count
     MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count--;);
