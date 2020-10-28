@@ -251,10 +251,17 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr, int* p_total_serviced_file)
 
         while(!feof(fp))
         {
+            char* find_enter = NULL;
             P_NODE p_node = get_node(&p_proc_mngr->memory_pool, NODE_FREE);
+            memset(p_node->domain, 0, MAX_NAME_LENGTH); // adding this just for valgrind
             
             fgets(p_node->domain, MAX_NAME_LENGTH, fp);
-            p_node->domain[strlen(p_node->domain) - 1] = '\0';
+
+            // this code cause [Invalid read of size 1]
+            //p_node->domain[strlen(p_node->domain) - 1] = '\0';    
+
+            find_enter = strchr(p_node->domain, '\n');
+            if(find_enter) *find_enter = '\0';
             
             if(strlen(p_node->domain) == 0) put_node(&p_proc_mngr->memory_pool, p_node, NODE_FREE);
             else put_node(&p_proc_mngr->memory_pool, p_node, NODE_USED);
