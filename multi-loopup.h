@@ -28,6 +28,10 @@
                                 OPR\
                                 pthread_mutex_unlock(LOCK);
 
+#define TIME_LAP(BEG, END, RES, OPR) gettimeofday(BEG, RES); \
+                                OPR\
+                                gettimeofday(END, RES);
+
 #define PROGRAM_USAGE "\
 NAME\n\n\
 multi-lookup - resolve a set of hostnames to IP addresses\n\n\
@@ -94,6 +98,7 @@ typedef struct _PROC_MNGR
     char* p_requester_log_path;
     char* p_resolver_log_path;
     char* hostname_paths[MAX_INPUT_FILES];
+    char performance_report[1024];
     THREAD_POOL requester_pool;
     THREAD_POOL resolver_pool;
     MEMORY_POOL memory_pool;
@@ -106,8 +111,8 @@ void *resolver_thread(void *);
 
 int parse_arguments(P_PROC_MNGR, int, const char **);
 void fill_tasks_helper(P_PROC_MNGR);
-int fill_tasks(P_PROC_MNGR);
-void save_log(char*, char*);
+int fill_tasks(P_PROC_MNGR, int*);
+int save_log(char*, char*);
 
 void init_thread_pool(P_PROC_MNGR);
 void free_thread_pool(P_PROC_MNGR);

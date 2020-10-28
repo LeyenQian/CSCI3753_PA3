@@ -4,6 +4,7 @@
 int main(int argc, const char **argv)
 {
     struct timeval beg, end;
+    char time_log[64] = {0};
 
     // parse & check arguments
     P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)malloc(sizeof(PROC_MNGR));
@@ -11,18 +12,24 @@ int main(int argc, const char **argv)
 
     if(parse_arguments(p_proc_mngr, argc, argv) == OP_FAILURE)
     {
-        printf(PROGRAM_USAGE);
         free(p_proc_mngr);
         return EXIT_FAILURE;
     }
+
+    sprintf(p_proc_mngr->performance_report, 
+            "Number of requester threads is %d\nNumber of resolver threads is %d\n",
+            p_proc_mngr->requester_threads_count, p_proc_mngr->resolver_threads_count);
     
     init_memory_pool(p_proc_mngr);
+    TIME_LAP(&beg, &end, NULL, init_thread_pool(p_proc_mngr););
 
-    gettimeofday(&beg, NULL);
-    init_thread_pool(p_proc_mngr);
-    gettimeofday(&end, NULL);
-    printf("%s: total time is %f seconds\n", argv[0], ((end.tv_sec - beg.tv_sec) * 1000000.0 + end.tv_usec - beg.tv_usec) / 1000000.0);
-
+    // save or append log to <performance.txt>
+    sprintf(time_log, 
+            "%s: total time is %f seconds\n\n", 
+            argv[0], ((end.tv_sec - beg.tv_sec) * 1000000.0 + end.tv_usec - beg.tv_usec) / 1000000.0);
+    strcat(p_proc_mngr->performance_report, time_log);
+    save_log("./performance.txt", p_proc_mngr->performance_report);
+    
     free_thread_pool(p_proc_mngr);
     free_memory_pool(p_proc_mngr);
     free(p_proc_mngr);
@@ -32,7 +39,12 @@ int main(int argc, const char **argv)
 
 int parse_arguments(P_PROC_MNGR p_proc_mngr, int argc, const char **argv)
 {
-    if(argc < 5) return OP_FAILURE;
+    FILE * fp = NULL;
+    if(argc < 5)
+    {
+        printf(PROGRAM_USAGE);
+        return OP_FAILURE;
+    }
     
     p_proc_mngr->requester_threads_count = atoi(argv[1]) > MAX_REQUESTER_THREADS ? MAX_REQUESTER_THREADS : atoi(argv[1]);
     p_proc_mngr->resolver_threads_count  = atoi(argv[2]) > MAX_RESOLVER_THREADS ? MAX_RESOLVER_THREADS : atoi(argv[2]);
@@ -44,6 +56,23 @@ int parse_arguments(P_PROC_MNGR p_proc_mngr, int argc, const char **argv)
     {
         p_proc_mngr->hostname_paths[p_proc_mngr->hostname_paths_count ++] = (char *)argv[idx];
     }
+
+    // only check the existence of the output path, not necessary for files
+    fp = fopen(p_proc_mngr->p_requester_log_path, "a");
+    if(fp == NULL)
+    {
+        fprintf(stderr, "Bogus output File Path: [ %s ]\n", p_proc_mngr->p_requester_log_path);
+        return OP_FAILURE;
+    }
+    fclose(fp);
+
+    fp = fopen(p_proc_mngr->p_resolver_log_path, "a");
+    if(fp == NULL)
+    {
+        fprintf(stderr, "Bogus output File Path: [ %s ]\n", p_proc_mngr->p_requester_log_path);
+        return OP_FAILURE;
+    }
+    fclose(fp);
 
     // arguments sanity check
     return (p_proc_mngr->requester_threads_count == 0 || 
@@ -188,7 +217,7 @@ void fill_tasks_helper(P_PROC_MNGR p_proc_mngr)
 }
 
 
-int fill_tasks(P_PROC_MNGR p_proc_mngr)
+int fill_tasks(P_PROC_MNGR p_proc_mngr, int* p_total_serviced_file)
 {
     // move content from queue to task list
     //      read file, queue is empty
@@ -203,7 +232,11 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr)
         char* path = p_proc_mngr->hostname_paths[--p_proc_mngr->hostname_paths_count];
 
         fp = fopen(path, "r");
-        if(fp == NULL) return OP_FAILURE;
+        if(fp == NULL)
+        {
+            fprintf(stderr, "Bogus input File Path: [ %s ]", path);
+            return OP_FAILURE;
+        }
 
         while(!feof(fp))
         {
@@ -217,6 +250,7 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr)
         }
 
         fclose(fp);
+        (*p_total_serviced_file) ++;
         fill_tasks_helper(p_proc_mngr);
     }
     
@@ -224,17 +258,25 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr)
 }
 
 
-void save_log(char* path, char* content)
+int save_log(char* path, char* content)
 {
+    FILE* fp = fopen(path, "a");
+    if(fp == NULL) return OP_FAILURE;
 
+    fwrite(content, strlen(content), 1, fp);
+    fclose(fp);
+    return OP_SUCCESS;
 }
 
 
 void *requester_thread(void *argv)
 {
+    int total_serviced_file = 0;
+    char log_content[64] = {0};
+
     // increase active count
     P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)argv;
-    MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count++;);
+    MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count++;)
 
     // try to get a input file path [with lock]
     //      succeed --> fill task list
@@ -244,24 +286,30 @@ void *requester_thread(void *argv)
         for(;;)
         {
             pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
-
             if(p_proc_mngr->hostname_paths_count < 1 && p_proc_mngr->memory_pool.used == NULL) break;
             if(p_proc_mngr->task_list.active_count > 0) continue;
-            if(fill_tasks(p_proc_mngr) == OP_FAILURE) continue;
+            if(fill_tasks(p_proc_mngr, &total_serviced_file) == OP_FAILURE) continue;
         }
-    );
+    )
 
-    // decrease active count
-    MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, p_proc_mngr->requester_pool.active_count--;);
+    // decrease active count & write log to <serviced.txt> & performance report
+    sprintf(log_content, "Thread %lx serviced %d files.\n", pthread_self(), total_serviced_file);
+    MUTEX_OPR(&p_proc_mngr->requester_pool.mutex, 
+        p_proc_mngr->requester_pool.active_count--;
+        save_log(p_proc_mngr->p_requester_log_path, log_content);
+        strcat(p_proc_mngr->performance_report, log_content);
+    )
     return NULL;
 }
 
 
 void *resolver_thread(void *argv)
 {
+    char log_content[MAX_NAME_LENGTH + MAX_IP_LENGTH] = {0};
+
     // increase pool active count
     P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)argv;
-    MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count++;);
+    MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, p_proc_mngr->resolver_pool.active_count++;)
 
     for(P_TASK p_task = NULL;;p_task = NULL)
     {
@@ -283,7 +331,7 @@ void *resolver_thread(void *argv)
                     p_task->flag = TASK_BUSY; break;
                 }
             }
-        );
+        )
 
         if(p_task == NULL)
         {
@@ -295,7 +343,8 @@ void *resolver_thread(void *argv)
         //      write result to <results.txt> [with lock]
         //      mark the flag as TASK_DONE
         dnslookup(p_task->domain, p_task->address, MAX_IP_LENGTH);
-        //printf("%lx  --->  %s: %s\n",pthread_self(), p_task->domain, p_task->address);
+        sprintf(log_content, "%s,%s\n", p_task->domain, p_task->address);
+        MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, save_log(p_proc_mngr->p_resolver_log_path, log_content);)
         p_task->flag = TASK_DONE;
     }
 
