@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #define ARRAY_SIZE            20
 #define MAX_INPUT_FILES       10

@@ -3,6 +3,8 @@
 
 int main(int argc, const char **argv)
 {
+    struct timeval beg, end;
+
     // parse & check arguments
     P_PROC_MNGR p_proc_mngr = (P_PROC_MNGR)malloc(sizeof(PROC_MNGR));
     memset(p_proc_mngr, 0, sizeof(PROC_MNGR));
@@ -15,7 +17,11 @@ int main(int argc, const char **argv)
     }
     
     init_memory_pool(p_proc_mngr);
+
+    gettimeofday(&beg, NULL);
     init_thread_pool(p_proc_mngr);
+    gettimeofday(&end, NULL);
+    printf("%s: total time is %f seconds\n", argv[0], ((end.tv_sec - beg.tv_sec) * 1000000.0 + end.tv_usec - beg.tv_usec) / 1000000.0);
 
     free_thread_pool(p_proc_mngr);
     free_memory_pool(p_proc_mngr);
@@ -195,7 +201,6 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr)
     {
         FILE *fp = NULL;
         char* path = p_proc_mngr->hostname_paths[--p_proc_mngr->hostname_paths_count];
-        printf("%s\n", path);
 
         fp = fopen(path, "r");
         if(fp == NULL) return OP_FAILURE;
@@ -239,9 +244,9 @@ void *requester_thread(void *argv)
         for(;;)
         {
             pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
-            printf("%lx  --->  receive empty signal\n",pthread_self());
 
             if(p_proc_mngr->hostname_paths_count < 1 && p_proc_mngr->memory_pool.used == NULL) break;
+            if(p_proc_mngr->task_list.active_count > 0) continue;
             if(fill_tasks(p_proc_mngr) == OP_FAILURE) continue;
         }
     );
@@ -290,7 +295,7 @@ void *resolver_thread(void *argv)
         //      write result to <results.txt> [with lock]
         //      mark the flag as TASK_DONE
         dnslookup(p_task->domain, p_task->address, MAX_IP_LENGTH);
-        printf("%lx  --->  %s: %s\n",pthread_self(), p_task->domain, p_task->address);
+        //printf("%lx  --->  %s: %s\n",pthread_self(), p_task->domain, p_task->address);
         p_task->flag = TASK_DONE;
     }
 
