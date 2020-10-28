@@ -1,5 +1,0 @@
-Thread 7ffff77ef700 serviced 1 files.
-Thread 7ffff57eb700 serviced 0 files.
-Thread 7ffff6fee700 serviced 2 files.
-Thread 7ffff67ed700 serviced 1 files.
-Thread 7ffff5fec700 serviced 1 files.

@@ -28,7 +28,7 @@
                                 OPR\
                                 pthread_mutex_unlock(LOCK);
 
-#define TIME_LAP(BEG, END, RES, OPR) gettimeofday(BEG, RES); \
+#define TIME_LAP(BEG, END, RES, OPR) gettimeofday(BEG, RES);\
                                 OPR\
                                 gettimeofday(END, RES);
 
@@ -67,6 +67,7 @@ typedef struct _TASK_LIST
     int active_count;
     pthread_mutex_t mutex;
     pthread_cond_t empty;
+    pthread_cond_t ready;
     TASK tasks[ARRAY_SIZE];
 }TASK_LIST, *P_TASK_LIST;
 
@@ -106,12 +107,13 @@ typedef struct _PROC_MNGR
 }PROC_MNGR, *P_PROC_MNGR;
 
 
+void fill_tasks_helper(P_PROC_MNGR);
+int fill_tasks(P_PROC_MNGR, int*);
+P_TASK get_task(P_PROC_MNGR);
 void *requester_thread(void *);
 void *resolver_thread(void *);
 
 int parse_arguments(P_PROC_MNGR, int, const char **);
-void fill_tasks_helper(P_PROC_MNGR);
-int fill_tasks(P_PROC_MNGR, int*);
 int save_log(char*, char*);
 
 void init_thread_pool(P_PROC_MNGR);

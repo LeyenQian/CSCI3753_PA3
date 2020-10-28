@@ -57,8 +57,8 @@ int parse_arguments(P_PROC_MNGR p_proc_mngr, int argc, const char **argv)
         p_proc_mngr->hostname_paths[p_proc_mngr->hostname_paths_count ++] = (char *)argv[idx];
     }
 
-    // only check the existence of the output path, not necessary for files
-    fp = fopen(p_proc_mngr->p_requester_log_path, "a");
+    // only check the existence of the output path, not necessary for files [overwrite if file exists]
+    fp = fopen(p_proc_mngr->p_requester_log_path, "w");
     if(fp == NULL)
     {
         fprintf(stderr, "Bogus output File Path: [ %s ]\n", p_proc_mngr->p_requester_log_path);
@@ -66,7 +66,7 @@ int parse_arguments(P_PROC_MNGR p_proc_mngr, int argc, const char **argv)
     }
     fclose(fp);
 
-    fp = fopen(p_proc_mngr->p_resolver_log_path, "a");
+    fp = fopen(p_proc_mngr->p_resolver_log_path, "w");
     if(fp == NULL)
     {
         fprintf(stderr, "Bogus output File Path: [ %s ]\n", p_proc_mngr->p_requester_log_path);
@@ -90,6 +90,7 @@ void init_thread_pool(P_PROC_MNGR p_proc_mngr)
     // initial task list
     pthread_mutex_init(&p_proc_mngr->task_list.mutex, NULL);
     pthread_cond_init(&p_proc_mngr->task_list.empty, NULL);
+    pthread_cond_init(&p_proc_mngr->task_list.ready, NULL);
 
     // initial resolver & requester threads pool
     pthread_mutex_init(&p_proc_mngr->requester_pool.mutex, NULL);
@@ -114,6 +115,7 @@ void free_thread_pool(P_PROC_MNGR p_proc_mngr)
     // clean up task list
     pthread_mutex_destroy(&p_proc_mngr->task_list.mutex);
     pthread_cond_destroy(&p_proc_mngr->task_list.empty);
+    pthread_cond_destroy(&p_proc_mngr->task_list.ready);
 
     // clean up threads pool
     pthread_mutex_destroy(&p_proc_mngr->requester_pool.mutex);
@@ -212,6 +214,7 @@ void fill_tasks_helper(P_PROC_MNGR p_proc_mngr)
 
         strcpy(p_proc_mngr->task_list.tasks[i].domain, p_node->domain);
         p_proc_mngr->task_list.tasks[i].flag = TASK_FREE;
+        p_proc_mngr->task_list.active_count ++;
         put_node(&p_proc_mngr->memory_pool, p_node, NODE_FREE);
     }
 }
@@ -229,13 +232,21 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr, int* p_total_serviced_file)
     else
     {
         FILE *fp = NULL;
-        char* path = p_proc_mngr->hostname_paths[--p_proc_mngr->hostname_paths_count];
-
-        fp = fopen(path, "r");
-        if(fp == NULL)
+        
+        // skip bogus input file
+        for(;;)
         {
-            fprintf(stderr, "Bogus input File Path: [ %s ]", path);
-            return OP_FAILURE;
+            char* path = NULL;
+            if(p_proc_mngr->hostname_paths_count < 1) return OP_FAILURE;
+            path = p_proc_mngr->hostname_paths[--p_proc_mngr->hostname_paths_count];
+
+            fp = fopen(path, "r");
+            if(fp == NULL)
+            {
+                fprintf(stderr, "Bogus input File Path: [ %s ]", path);
+                continue;
+            }
+            break;
         }
 
         while(!feof(fp))
@@ -282,15 +293,17 @@ void *requester_thread(void *argv)
     //      succeed --> fill task list
     //      failed  --> continue the loop, if input file path is incorrect
     //      failed  --> terminate thread,  if hostname_paths_count <= 1
-    MUTEX_OPR(&p_proc_mngr->task_list.mutex, 
+    MUTEX_OPR(&p_proc_mngr->task_list.mutex,
         for(;;)
         {
             pthread_cond_wait(&p_proc_mngr->task_list.empty, &p_proc_mngr->task_list.mutex);
             if(p_proc_mngr->hostname_paths_count < 1 && p_proc_mngr->memory_pool.used == NULL) break;
             if(p_proc_mngr->task_list.active_count > 0) continue;
-            if(fill_tasks(p_proc_mngr, &total_serviced_file) == OP_FAILURE) continue;
+            if(fill_tasks(p_proc_mngr, &total_serviced_file) == OP_FAILURE) break;
+            pthread_cond_broadcast(&p_proc_mngr->task_list.ready);
         }
     )
+    pthread_cond_broadcast(&p_proc_mngr->task_list.ready);
 
     // decrease active count & write log to <serviced.txt> & performance report
     sprintf(log_content, "Thread %lx serviced %d files.\n", pthread_self(), total_serviced_file);
@@ -300,6 +313,24 @@ void *requester_thread(void *argv)
         strcat(p_proc_mngr->performance_report, log_content);
     )
     return NULL;
+}
+
+
+P_TASK get_task(P_PROC_MNGR p_proc_mngr)
+{
+    P_TASK p_task = NULL;
+
+    for(int i = 0; i < ARRAY_SIZE; i ++)
+    {
+        if(p_proc_mngr->task_list.tasks[i].flag == TASK_FREE)
+        {
+            p_proc_mngr->task_list.active_count --;
+            p_task = &p_proc_mngr->task_list.tasks[i];
+            p_task->flag = TASK_BUSY; break;
+        }
+    }
+
+    return p_task;
 }
 
 
@@ -321,27 +352,18 @@ void *resolver_thread(void *argv)
         //      succeed --> mark the flag as TASK_BUSY
         //      failed  --> terminate thread, if active count of requesters <= 0
         //      failed  --> notify requester, if active count of requesters > 0
-        MUTEX_OPR(&p_proc_mngr->task_list.mutex, 
-            for(int i = 0; i < ARRAY_SIZE; i ++)
+        MUTEX_OPR(&p_proc_mngr->task_list.mutex,
+            p_task = get_task(p_proc_mngr);
+
+            if(p_task == NULL)
             {
-                if(p_proc_mngr->task_list.tasks[i].flag == TASK_FREE)
-                {
-                    p_proc_mngr->task_list.active_count --;
-                    p_task = &p_proc_mngr->task_list.tasks[i];
-                    p_task->flag = TASK_BUSY; break;
-                }
+                if(p_proc_mngr->requester_pool.active_count <= 0) break;
+                pthread_cond_broadcast(&p_proc_mngr->task_list.empty);
+                pthread_cond_wait(&p_proc_mngr->task_list.ready, &p_proc_mngr->task_list.mutex);
+                pthread_mutex_unlock(&p_proc_mngr->task_list.mutex); continue;
             }
         )
 
-        if(p_task == NULL)
-        {
-            if(p_proc_mngr->requester_pool.active_count <= 0) break;
-            pthread_cond_signal(&p_proc_mngr->task_list.empty); continue;
-        }
-
-        // solve the task [without lock]
-        //      write result to <results.txt> [with lock]
-        //      mark the flag as TASK_DONE
         dnslookup(p_task->domain, p_task->address, MAX_IP_LENGTH);
         sprintf(log_content, "%s,%s\n", p_task->domain, p_task->address);
         MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, save_log(p_proc_mngr->p_resolver_log_path, log_content);)
