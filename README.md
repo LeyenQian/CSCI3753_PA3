@@ -3,6 +3,7 @@
  - Name: Leyen Qian</br>
  - Email: jiqi2811@colorado.edu</br>
  - CU Identity: 108384916</br>
+ - GitHub: https://github.com/LeyenQian/CSCI3753_PA3</br>
 
  ### Files Description
  - multi-lookup.h</br>
