@@ -310,7 +310,6 @@ void *requester_thread(void *argv)
             pthread_cond_broadcast(&p_proc_mngr->task_list.ready);
         }
     )
-    pthread_cond_broadcast(&p_proc_mngr->task_list.ready);
 
     // decrease active count & write log to <serviced.txt> & performance report
     sprintf(log_content, "Thread %lx serviced %d files.\n", pthread_self(), total_serviced_file);
@@ -319,6 +318,10 @@ void *requester_thread(void *argv)
         save_log(p_proc_mngr->p_requester_log_path, log_content);
         strcat(p_proc_mngr->performance_report, log_content);
     )
+
+    // in case when current thread is the last one, while there still resolvers wait for ready condition
+    // only notify resolvers after reduce the active count
+    pthread_cond_broadcast(&p_proc_mngr->task_list.ready);
     return NULL;
 }
 
