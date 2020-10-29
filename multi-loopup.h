@@ -6,7 +6,7 @@
 #include <sys/time.h>
 
 #define ARRAY_SIZE            20
-#define MAX_INPUT_FILES       10
+#define MAX_INPUT_FILES       30
 #define MAX_RESOLVER_THREADS  10
 #define MAX_REQUESTER_THREADS 5
 #define MAX_NAME_LENGTH       1025

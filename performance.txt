@@ -1,0 +1,33 @@
+Number of requester threads is 1
+Number of resolver threads is 1
+Thread 7ffff77ef700 serviced 30 files.
+/home/leyen/Desktop/code/multi-lookup: total time is 36.932376 seconds
+
+Number of requester threads is 1
+Number of resolver threads is 3
+Thread 7ffff77ef700 serviced 30 files.
+/home/leyen/Desktop/code/multi-lookup: total time is 11.935920 seconds
+
+Number of requester threads is 3
+Number of resolver threads is 1
+Thread 7ffff6fee700 serviced 13 files.
+Thread 7ffff77ef700 serviced 4 files.
+Thread 7ffff67ed700 serviced 13 files.
+/home/leyen/Desktop/code/multi-lookup: total time is 23.132857 seconds
+
+Number of requester threads is 3
+Number of resolver threads is 3
+Thread 7ffff67ed700 serviced 15 files.
+Thread 7ffff77ef700 serviced 8 files.
+Thread 7ffff6fee700 serviced 7 files.
+/home/leyen/Desktop/code/multi-lookup: total time is 4.877785 seconds
+
+Number of requester threads is 5
+Number of resolver threads is 5
+Thread 7ffff77ef700 serviced 1 files.
+Thread 7ffff6fee700 serviced 7 files.
+Thread 7ffff5fec700 serviced 0 files.
+Thread 7ffff57eb700 serviced 0 files.
+Thread 7ffff67ed700 serviced 22 files.
+/home/leyen/Desktop/code/multi-lookup: total time is 2.211609 seconds
+

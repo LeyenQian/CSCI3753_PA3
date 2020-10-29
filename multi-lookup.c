@@ -371,6 +371,7 @@ void *resolver_thread(void *argv)
             }
         )
 
+        memset(p_task->address, 0, MAX_IP_LENGTH);
         dnslookup(p_task->domain, p_task->address, MAX_IP_LENGTH);
         sprintf(log_content, "%s,%s\n", p_task->domain, p_task->address);
         MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, save_log(p_proc_mngr->p_resolver_log_path, log_content);)
