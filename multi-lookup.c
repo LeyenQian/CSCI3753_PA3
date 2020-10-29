@@ -27,6 +27,7 @@ int main(int argc, const char **argv)
     sprintf(time_log, 
             "%s: total time is %f seconds\n\n", 
             argv[0], ((end.tv_sec - beg.tv_sec) * 1000000.0 + end.tv_usec - beg.tv_usec) / 1000000.0);
+    printf("%s\n", time_log);
     strcat(p_proc_mngr->performance_report, time_log);
     save_log("./performance.txt", p_proc_mngr->performance_report);
     
@@ -243,7 +244,7 @@ int fill_tasks(P_PROC_MNGR p_proc_mngr, int* p_total_serviced_file)
             fp = fopen(path, "r");
             if(fp == NULL)
             {
-                fprintf(stderr, "Bogus input File Path: [ %s ]", path);
+                fprintf(stderr, "Bogus input File Path: [ %s ]\n", path);
                 continue;
             }
             break;
@@ -377,6 +378,7 @@ void *resolver_thread(void *argv)
         memset(p_task->address, 0, MAX_IP_LENGTH);
         dnslookup(p_task->domain, p_task->address, MAX_IP_LENGTH);
         sprintf(log_content, "%s,%s\n", p_task->domain, p_task->address);
+        if(strlen(p_task->address) == 0) fprintf(stderr, "Bogus Hostname: [ %s ]\n", p_task->domain);
         MUTEX_OPR(&p_proc_mngr->resolver_pool.mutex, save_log(p_proc_mngr->p_resolver_log_path, log_content);)
         p_task->flag = TASK_DONE;
     }
