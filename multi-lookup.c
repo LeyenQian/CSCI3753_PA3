@@ -355,10 +355,6 @@ void *resolver_thread(void *argv)
 
     for(P_TASK p_task = NULL;;p_task = NULL)
     {
-        // check termination condition [without lock]
-        if(p_proc_mngr->requester_pool.active_count <= 0 &&
-           p_proc_mngr->task_list.active_count <= 0) break;
-
         // try to get a task [with lock]
         //      succeed --> mark the flag as TASK_BUSY
         //      failed  --> terminate thread, if active count of requesters <= 0
@@ -368,7 +364,15 @@ void *resolver_thread(void *argv)
 
             if(p_task == NULL)
             {
-                if(p_proc_mngr->requester_pool.active_count <= 0) break;
+                // check termination condition
+                if(p_proc_mngr->requester_pool.active_count <= 0 && 
+                   p_proc_mngr->task_list.active_count <= 0)
+                {
+                    pthread_mutex_unlock(&p_proc_mngr->task_list.mutex);
+                    break;
+                }
+
+                // ask requesters to the fill task list
                 pthread_cond_broadcast(&p_proc_mngr->task_list.empty);
                 pthread_cond_wait(&p_proc_mngr->task_list.ready, &p_proc_mngr->task_list.mutex);
                 pthread_mutex_unlock(&p_proc_mngr->task_list.mutex); continue;
