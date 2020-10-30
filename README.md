@@ -18,3 +18,4 @@
  ### Building Instructions
  - type \<make\> for building or \<make clean\> for cleaning.</br>
  - We shall get an executable file "multi-loopup"</br>
+ - type "./multi-lookup 5 5 serviced.txt results.txt input/names*.txt" for running</br>
